@@ -89,7 +89,10 @@ def set_servo_position(port, percentage):
 # ===========================================================================
 
 import socket
+import re
 import sys
+from base64 import b64encode
+from hashlib import sha1
 from thread import *
 
 HOST = ''   # Symbolic name meaning all available interfaces
@@ -109,61 +112,93 @@ except socket.error as msg:
 print 'Socket bound'
  
 #Start listening on socket
-s.listen(10)
+s.listen(1)
 print 'Socket listening'
+
+def handshake (client):
+	print 'Handshaking...'
+	text = client.recv(1024)
+
+	websocket_answer = (
+	    'HTTP/1.1 101 Switching Protocols',
+	    'Upgrade: websocket',
+	    'Connection: Upgrade',
+	    'Sec-WebSocket-Accept: {key}\r\n\r\n',
+	)
+
+	GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+	key = (re.search('Sec-WebSocket-Key:\s+(.*?)[\n\r]+', text)
+		.groups()[0]
+		.strip())
+
+	#print "--/--" + key + "--/--"
+
+	shake_key = b64encode(sha1(key + GUID).digest())
+	shake = '\r\n'.join(websocket_answer).format(key=shake_key)
+
+	return client.send(shake)
+
 
 #Function for handling connections. This will be used to create threads
 def clientthread(conn):
     #Sending message to connected client
     #conn.send('{"servoMin":'+servoMin+',"servoMax":'+servoMax+'}\n') #send only takes string
-    conn.send('Howdie!\n') #send only takes string
-     
+    	
+	handshake(conn)
+	print "Sending hello"
+
+	conn.send('Howdie!') #send only takes string
+	     
     #infinite loop so that function do not terminate and thread do not end.
-    while True:
+	while True:
          
-        #Receiving from client
-        data = conn.recv(1024)
-	
-	#print data
-	
-	if data[0:4] == "exit":
-		conn.sendall('bye\n')
-		break
-	
-	else:
-		try: 
-			json_data = json.loads( data )	
-	
-			if json_data['do'] == 'position':
-				reply = set_servo_position(int(json_data['port']), float(json_data['percentage']))
+        	#Receiving from client
+        	data = conn.recv(1024)
+		
+		print "Got something from client..."
+		print "--:"+data
+		
+		conn.send('Thank you - thinking')
 
-			elif json_data['do'] == 'get_config':
-				reply = get_servo_config(int(json_data['port']))
+		if data[0:4] == "exit":
+			conn.sendall('bye')
+			break
+	
+		else:
+			try: 
+				json_data = json.loads( data )	
+	
+				if json_data['do'] == 'position':
+					reply = set_servo_position(int(json_data['port']), float(json_data['percentage']))
 
-			elif json_data['do'] == 'set_max':
-				reply = set_servo_max(int(json_data['port']), int(json_data['value']))
+				elif json_data['do'] == 'get_config':
+					reply = get_servo_config(int(json_data['port']))
 
-			elif json_data['do'] == 'set_min':
-				reply = set_servo_min(int(json_data['port']), int(json_data['value']))
+				elif json_data['do'] == 'set_max':
+					reply = set_servo_max(int(json_data['port']), int(json_data['value']))
 
-			elif json_data['do'] == 'set_start':
-				reply = set_servo_start(int(json_data['port']), int(json_data['value']))
+				elif json_data['do'] == 'set_min':
+					reply = set_servo_min(int(json_data['port']), int(json_data['value']))
+
+				elif json_data['do'] == 'set_start':
+					reply = set_servo_start(int(json_data['port']), int(json_data['value']))
 			
-			else:
-				reply = {"error":"eh?"}
+				else:
+					reply = {"error":"eh?"}
 
-        		conn.sendall(json.dumps(reply)+'\n')			
+	        		conn.sendall(json.dumps(reply))			
 
-		except ValueError: 			
-			reply = {"error":"invalid-request"}
-         		conn.sendall(json.dumps(reply)+'\n')
+			except ValueError: 			
+				reply = {"error":"invalid-request"}
+         			conn.sendall(json.dumps(reply))
 
-		except KeyError: 			
-			reply = {"error":"missing-something-important"}
-         		conn.sendall(json.dumps(reply)+'\n')
+			except KeyError: 			
+				reply = {"error":"missing-something-important"}
+         			conn.sendall(json.dumps(reply))
 
-    #came out of loop
-    conn.close()
+	#came out of loop
+	conn.close()
  
 #now keep talking with the client
 while 1:
